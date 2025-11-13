@@ -1,0 +1,99 @@
+# Prometheus Configuration for LLM Feature Store
+# This file defines what metrics to scrape and from where
+
+global:
+  scrape_interval: 15s      # How often to scrape targets
+  evaluation_interval: 15s  # How often to evaluate rules
+
+  # Labels attached to all metrics
+  external_labels:
+    cluster: 'llm-feature-store-local'
+    environment: 'development'
+
+# Alerting configuration (for production)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - alertmanager:9093  # Uncomment for production
+
+# Load alert rules
+rule_files:
+  # - "alerts/*.yml"  # Uncomment when you add alert rules
+
+# Scrape configurations
+scrape_configs:
+  # =============================================================================
+  # Prometheus itself (meta-monitoring)
+  # =============================================================================
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # =============================================================================
+  # OpenFaaS Gateway Metrics
+  # =============================================================================
+  # Tracks function invocations, latencies, errors
+  - job_name: 'openfaas-gateway'
+    scrape_interval: 5s  # More frequent for function metrics
+    static_configs:
+      - targets: ['gateway:8080']
+    metrics_path: /metrics
+
+  # =============================================================================
+  # Kafka Exporter (if we add it)
+  # =============================================================================
+  # Tracks message throughput, consumer lag, partition health
+  # - job_name: 'kafka'
+  #   static_configs:
+  #     - targets: ['kafka-exporter:9308']
+
+  # =============================================================================
+  # Redis Exporter (if we add it)
+  # =============================================================================
+  # Tracks cache hit rate, memory usage, evictions
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+
+  # =============================================================================
+  # Custom Application Metrics
+  # =============================================================================
+  # Your Python services can expose metrics on /metrics endpoint
+  - job_name: 'feature-store-api'
+    scrape_interval: 10s
+    static_configs:
+      - targets: []  # Add when you deploy API service
+        # Example: ['feature-api:8000']
+
+  # =============================================================================
+  # Cost Tracking Metrics
+  # =============================================================================
+  # Custom metrics for tracking LLM API costs
+  # These will be pushed via Pushgateway or exposed by your services
+  - job_name: 'cost-metrics'
+    honor_labels: true
+    static_configs:
+      - targets: []  # Add when you implement cost tracking service
+
+# =============================================================================
+# METRIC TYPES WE TRACK
+# =============================================================================
+#
+# Function Metrics:
+#   - gateway_function_invocation_total: Total function calls
+#   - gateway_function_invocation_duration_seconds: Function latency
+#   - gateway_service_replica_count: Function replicas
+#
+# Feature Store Metrics (custom):
+#   - feature_store_read_total: Feature reads
+#   - feature_store_write_total: Feature writes
+#   - feature_store_cache_hit_ratio: Cache effectiveness
+#   - feature_store_drift_detected_total: Drift events
+#
+# Cost Metrics (custom):
+#   - llm_api_cost_total: Total LLM costs
+#   - llm_tokens_used_total: Token usage
+#   - embedding_cache_savings_total: Money saved by caching
+#
+# =============================================================================

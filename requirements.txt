@@ -1,0 +1,101 @@
+# =============================================================================
+# Core Dependencies for LLM Feature Store
+# =============================================================================
+
+# Data Processing
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+pyarrow>=14.0.0  # For efficient data serialization
+
+# Storage Layer
+duckdb>=0.9.0  # Lightweight OLAP database (zero cost!)
+deltalake>=0.14.0  # Delta Lake for S3
+boto3>=1.28.0  # AWS SDK for S3/DynamoDB
+redis>=5.0.0  # Caching layer
+
+# Kafka / Event Streaming
+kafka-python>=2.0.0  # Kafka producer/consumer
+confluent-kafka>=2.3.0  # Higher performance Kafka client
+
+# Embeddings & ML
+sentence-transformers>=2.2.0  # Local embedding models (cost-efficient!)
+torch>=2.1.0  # PyTorch for embeddings
+scikit-learn>=1.3.0  # ML utilities, drift detection
+scipy>=1.11.0  # Statistical functions
+
+# Temporal.io - Workflow Orchestration
+temporalio>=1.5.0
+
+# API & Web
+fastapi>=0.104.0  # For REST API
+uvicorn>=0.24.0  # ASGI server
+pydantic>=2.5.0  # Data validation
+httpx>=0.25.0  # HTTP client
+
+# Monitoring & Observability
+prometheus-client>=0.19.0  # Metrics exposition
+structlog>=23.2.0  # Structured logging
+
+# OpenFaaS
+# Note: Functions are deployed separately, but we need SDK for testing
+requests>=2.31.0  # HTTP requests for function calls
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+faker>=20.0.0  # Generate test data
+
+# Data Science / Analysis (optional, for Jupyter)
+matplotlib>=3.8.0
+seaborn>=0.13.0
+jupyter>=1.0.0
+ipython>=8.17.0
+
+# Utilities
+python-dotenv>=1.0.0  # Environment variables
+typer>=0.9.0  # CLI framework
+rich>=13.7.0  # Beautiful CLI output
+tenacity>=8.2.0  # Retry logic
+pyyaml>=6.0.0  # Config files
+
+# Cloud Providers (mark as optional)
+# Install only if deploying to cloud
+# google-cloud-bigquery>=3.13.0
+# google-cloud-storage>=2.10.0
+
+# =============================================================================
+# Cost Optimization Notes:
+# =============================================================================
+#
+# 1. sentence-transformers instead of OpenAI embeddings:
+#    - Cost: $0 (runs locally)
+#    - vs OpenAI: ~$0.0001 per 1K tokens
+#    - Savings: ~$100/month for 1M embeddings
+#
+# 2. DuckDB instead of BigQuery:
+#    - Cost: $0 (runs locally or on your server)
+#    - vs BigQuery: ~$5/TB queried
+#    - Savings: ~$50/month for analytical queries
+#
+# 3. Redis caching:
+#    - Reduces repeated embedding generations by 90%+
+#    - ROI: ~$90 saved per $10 spent on Redis
+#
+# =============================================================================
+
+# =============================================================================
+# Installation Instructions:
+# =============================================================================
+#
+# Basic installation (development):
+#   pip install -r requirements.txt
+#
+# Production installation (with pinned versions):
+#   pip install -r requirements.txt --no-deps
+#
+# Install with GPU support for faster embeddings:
+#   pip install -r requirements.txt
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+#
+# =============================================================================

@@ -1,0 +1,300 @@
+# Docker Compose for Local Development
+# This setup allows you to develop and test the entire feature store locally
+# with ZERO cloud costs!
+
+version: '3.8'
+
+services:
+  # =============================================================================
+  # KAFKA - Event Streaming Platform
+  # =============================================================================
+  # Used for ingesting LLM interaction events in real-time
+  # Cost savings: Free locally vs ~$100/month for Confluent Cloud
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Internal listener for docker network
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9094
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # Kafka UI for monitoring (optional but helpful for learning)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    depends_on:
+      - kafka
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+
+  # =============================================================================
+  # REDIS - Caching Layer
+  # =============================================================================
+  # Used for caching embeddings and features
+  # Cost savings: Free locally vs ~$15/month for Redis Cloud
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Redis Commander for visualization (optional)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    depends_on:
+      - redis
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+
+  # =============================================================================
+  # TEMPORAL - Workflow Orchestration
+  # =============================================================================
+  # Manages long-running workflows like feature refresh, drift detection
+  # Cost savings: Free locally vs ~$200/month for managed service
+  temporal:
+    image: temporalio/auto-setup:1.22.0
+    depends_on:
+      - postgresql
+    ports:
+      - "7233:7233"
+    environment:
+      DB: postgresql
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: postgresql
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./config/temporal:/etc/temporal/config/dynamicconfig
+
+  # Temporal UI for monitoring workflows
+  temporal-ui:
+    image: temporalio/ui:2.21.0
+    depends_on:
+      - temporal
+    ports:
+      - "8082:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+
+  # =============================================================================
+  # POSTGRESQL - Database for Temporal
+  # =============================================================================
+  postgresql:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  # =============================================================================
+  # OPENFAAS - Serverless Functions Platform
+  # =============================================================================
+  # Runs our feature computation functions
+  # Cost savings: Free locally vs ~$50/month for managed FaaS
+
+  # OpenFaaS Gateway
+  gateway:
+    image: openfaas/gateway:0.27.0
+    ports:
+      - "8083:8080"
+    environment:
+      functions_provider_url: "http://faas-swarm:8080/"
+      direct_functions: "true"
+      read_timeout: "5m"
+      write_timeout: "5m"
+      upstream_timeout: "5m"
+    depends_on:
+      - faas-swarm
+
+  # OpenFaaS Function Provider (using faas-swarm for simplicity)
+  faas-swarm:
+    image: openfaas/faas-swarm:0.12.0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      read_timeout: "5m"
+      write_timeout: "5m"
+      DOCKER_API_VERSION: "1.40"
+
+  # =============================================================================
+  # PROMETHEUS - Metrics Collection
+  # =============================================================================
+  # Collects metrics from functions and system components
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+
+  # =============================================================================
+  # GRAFANA - Metrics Visualization
+  # =============================================================================
+  # Dashboards for monitoring feature store health
+  grafana:
+    image: grafana/grafana:10.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  # =============================================================================
+  # MINIO - S3-Compatible Object Storage
+  # =============================================================================
+  # Local replacement for S3 to store Delta Lake files
+  # Cost savings: Free locally vs ~$10/month for S3 (for dev workloads)
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Create default bucket for Delta Lake
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb local/delta-lake || true;
+      mc mb local/feature-store || true;
+      mc policy set download local/delta-lake;
+      "
+
+  # =============================================================================
+  # JUPYTER - Interactive Development Environment
+  # =============================================================================
+  # For exploring data and testing features
+  jupyter:
+    build:
+      context: ./docker/jupyter
+      dockerfile: Dockerfile
+    ports:
+      - "8888:8888"
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./src:/home/jovyan/src
+      - ./examples:/home/jovyan/examples
+    command: start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''
+
+# =============================================================================
+# VOLUMES - Persistent Data Storage
+# =============================================================================
+volumes:
+  zookeeper-data:
+  zookeeper-logs:
+  kafka-data:
+  redis-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:
+  minio-data:
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  default:
+    name: llm-feature-store
+    driver: bridge
+
+# =============================================================================
+# USAGE INSTRUCTIONS
+# =============================================================================
+#
+# Start all services:
+#   docker-compose up -d
+#
+# View logs:
+#   docker-compose logs -f <service-name>
+#
+# Stop all services:
+#   docker-compose down
+#
+# Stop and remove all data:
+#   docker-compose down -v
+#
+# Access UIs:
+#   - Kafka UI: http://localhost:8080
+#   - Redis Commander: http://localhost:8081
+#   - Temporal UI: http://localhost:8082
+#   - OpenFaaS Gateway: http://localhost:8083
+#   - Prometheus: http://localhost:9090
+#   - Grafana: http://localhost:3000 (admin/admin)
+#   - MinIO Console: http://localhost:9001 (minioadmin/minioadmin)
+#   - Jupyter: http://localhost:8888
+#
+# Estimated RAM usage: ~4GB
+# Estimated disk usage: ~2GB (without data)
+# =============================================================================
