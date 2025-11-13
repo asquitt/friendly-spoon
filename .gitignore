@@ -80,3 +80,9 @@ models/
 *.bin
 *.pt
 *.pth
+
+# Test coverage files
+.coverage
+*.coverage
+coverage.xml
+htmlcov/
