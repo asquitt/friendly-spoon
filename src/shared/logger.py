@@ -58,7 +58,7 @@ def setup_logger(
             logging.DEBUG if debug else logging.INFO
         ),
         context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+        logger_factory=structlog.stdlib.LoggerFactory(),
         cache_logger_on_first_use=True,
     )
 
