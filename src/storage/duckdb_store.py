@@ -74,6 +74,7 @@ class DuckDBStore:
 
         self.db_path = db_path
         self.conn = duckdb.connect(db_path)
+        self._closed = False
 
         # Set memory limit (prevents OOM on large queries)
         config = get_config()
@@ -83,6 +84,38 @@ class DuckDBStore:
         self._create_tables()
 
         log.info("duckdb_store_initialized", db_path=db_path)
+
+    def __enter__(self):
+        """Context manager entry - return self."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - close connection."""
+        self.close()
+        return False
+
+    def __del__(self):
+        """Ensure connection is closed on garbage collection."""
+        if not self._closed:
+            try:
+                self.close()
+            except Exception:
+                pass  # Ignore errors during cleanup
+
+    def close(self) -> None:
+        """
+        Close database connection.
+
+        Safe to call multiple times (idempotent).
+        """
+        if not self._closed:
+            try:
+                self.conn.close()
+                log.info("duckdb_store_closed", db_path=self.db_path)
+            except Exception as e:
+                log.warning("duckdb_store_close_error", error=str(e))
+            finally:
+                self._closed = True
 
     def _create_tables(self) -> None:
         """
@@ -95,7 +128,7 @@ class DuckDBStore:
         """
 
         # Table for LLM interactions
-        self.conn.execute("""
+        self.conn.execute(f"""
             CREATE TABLE IF NOT EXISTS llm_interactions (
                 interaction_id VARCHAR PRIMARY KEY,
                 user_id VARCHAR NOT NULL,
@@ -260,16 +293,24 @@ class DuckDBStore:
             >>> for date, cost in costs.items():
             ...     print(f"{date}: ${cost:.2f}")
         """
+        # Input validation
+        if days <= 0:
+            raise ValueError(f"days must be positive, got {days}")
+        if days > 365:
+            log.warning("large_lookback_period", days=days,
+                       message="Requesting >1 year of data may be slow")
+
         try:
-            query = """
+            # Note: DuckDB doesn't support ? placeholders in INTERVAL, so we use f-string
+            query = f"""
                 SELECT
                     date::VARCHAR as date,
                     SUM(cost_usd) as total_cost
                 FROM llm_interactions
-                WHERE date >= CURRENT_DATE - INTERVAL ? DAY
+                WHERE date >= CURRENT_DATE - INTERVAL '{days}' DAY
             """
 
-            params = [days]
+            params = []
 
             if user_id:
                 query += " AND user_id = ?"
@@ -277,7 +318,10 @@ class DuckDBStore:
 
             query += " GROUP BY date ORDER BY date"
 
-            result = self.conn.execute(query, params).fetchall()
+            if params:
+                result = self.conn.execute(query, params).fetchall()
+            else:
+                result = self.conn.execute(query).fetchall()
 
             return {row[0]: float(row[1]) for row in result}
 
@@ -304,15 +348,15 @@ class DuckDBStore:
             ...     print(f"{model}: ${cost:.2f}")
         """
         try:
-            result = self.conn.execute("""
+            result = self.conn.execute(f"""
                 SELECT
                     model,
                     SUM(cost_usd) as total_cost
                 FROM llm_interactions
-                WHERE date >= CURRENT_DATE - INTERVAL ? DAY
+                WHERE date >= CURRENT_DATE - INTERVAL '{days}' DAY
                 GROUP BY model
                 ORDER BY total_cost DESC
-            """, [days]).fetchall()
+            """).fetchall()
 
             return {row[0]: float(row[1]) for row in result}
 
@@ -339,7 +383,7 @@ class DuckDBStore:
             >>> print(f"Avg per request: {stats['avg_tokens_per_request']:.1f}")
         """
         try:
-            result = self.conn.execute("""
+            result = self.conn.execute(f"""
                 SELECT
                     SUM(total_tokens) as total_tokens,
                     AVG(total_tokens) as avg_tokens,
@@ -347,8 +391,8 @@ class DuckDBStore:
                     SUM(output_tokens) as total_output,
                     COUNT(*) as interaction_count
                 FROM llm_interactions
-                WHERE date >= CURRENT_DATE - INTERVAL ? DAY
-            """, [days]).fetchone()
+                WHERE date >= CURRENT_DATE - INTERVAL '{days}' DAY
+            """).fetchone()
 
             if result:
                 return {
@@ -392,16 +436,16 @@ class DuckDBStore:
             >>> df.plot(x='timestamp', y='value', title='Prompt Length Over Time')
         """
         try:
-            result = self.conn.execute("""
+            result = self.conn.execute(f"""
                 SELECT
                     timestamp,
                     value
                 FROM features
                 WHERE entity_id = ?
                     AND feature_name = ?
-                    AND date >= CURRENT_DATE - INTERVAL ? DAY
+                    AND date >= CURRENT_DATE - INTERVAL '{days}' DAY
                 ORDER BY timestamp
-            """, [entity_id, feature_name, days]).fetchdf()
+            """, [entity_id, feature_name]).fetchdf()
 
             return result
 
@@ -435,7 +479,7 @@ class DuckDBStore:
             ...     print(f"{user['user_id']}: ${user['total_cost']:.2f}")
         """
         try:
-            result = self.conn.execute("""
+            result = self.conn.execute(f"""
                 SELECT
                     user_id,
                     SUM(cost_usd) as total_cost,
@@ -443,11 +487,11 @@ class DuckDBStore:
                     SUM(total_tokens) as total_tokens,
                     AVG(latency_ms) as avg_latency
                 FROM llm_interactions
-                WHERE date >= CURRENT_DATE - INTERVAL ? DAY
+                WHERE date >= CURRENT_DATE - INTERVAL '{days}' DAY
                 GROUP BY user_id
                 ORDER BY total_cost DESC
                 LIMIT ?
-            """, [days, limit]).fetchall()
+            """, [limit]).fetchall()
 
             return [
                 {
@@ -496,12 +540,6 @@ class DuckDBStore:
         except Exception as e:
             log.error("execute_query_failed", error=str(e), query=query[:100])
             return pd.DataFrame()
-
-    def close(self) -> None:
-        """Close database connection."""
-        self.conn.close()
-        log.info("duckdb_store_closed")
-
 
 # =============================================================================
 # Example Usage

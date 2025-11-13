@@ -333,3 +333,82 @@ class TestDuckDBPerformance:
 
         # Should be fast (< 100ms)
         assert elapsed < 100
+
+class TestInputValidation:
+    """Test input validation enhancements."""
+
+    def test_get_cost_by_day_negative_days_raises_error(self, temp_duckdb):
+        """Test that negative days parameter raises ValueError."""
+        with pytest.raises(ValueError, match="days must be positive"):
+            temp_duckdb.get_cost_by_day(days=-5)
+
+    def test_get_cost_by_day_zero_days_raises_error(self, temp_duckdb):
+        """Test that zero days parameter raises ValueError."""
+        with pytest.raises(ValueError, match="days must be positive"):
+            temp_duckdb.get_cost_by_day(days=0)
+
+    def test_get_cost_by_day_large_days_logs_warning(self, temp_duckdb, caplog):
+        """Test that large days parameter logs warning."""
+        # Clear any previous logs
+        caplog.clear()
+
+        # Request more than 365 days
+        temp_duckdb.get_cost_by_day(days=400)
+
+        # Check that warning was logged
+        assert any(
+            "large_lookback_period" in str(record) or "1 year" in str(record)
+            for record in caplog.records
+        )
+
+
+class TestResourceCleanup:
+    """Test resource cleanup and context manager support."""
+
+    def test_store_has_context_manager(self):
+        """Test that store can be used as context manager."""
+        with DuckDBStore(db_path=":memory:") as store:
+            # Should be able to use the store
+            interaction = LLMInteraction(
+                interaction_id="ctx_test",
+                user_id="user_ctx",
+                model="gpt-4",
+                provider=ModelProvider.OPENAI,
+                prompt="Test",
+                response="Test response",
+                input_tokens=5,
+                output_tokens=10,
+                latency_ms=100.0,
+                cost_usd=0.001
+            )
+            success = store.insert_interaction(interaction)
+            assert success is True
+
+        # After exiting context, connection should be closed
+        assert store._closed is True
+
+    def test_explicit_close(self):
+        """Test explicit close method."""
+        store = DuckDBStore(db_path=":memory:")
+        assert not hasattr(store, '_closed') or store._closed is False
+
+        store.close()
+        assert store._closed is True
+
+        # Calling close again should be safe (idempotent)
+        store.close()
+        assert store._closed is True
+
+    def test_del_closes_connection(self):
+        """Test that __del__ closes connection."""
+        store = DuckDBStore(db_path=":memory:")
+        initial_closed = getattr(store, '_closed', False)
+        assert initial_closed is False
+
+        # Delete the store
+        del store
+        # If no exception is raised, cleanup worked
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

@@ -326,6 +326,17 @@ class CacheManager:
             >>> # Clear all features for a user
             >>> cache.clear_pattern("feature:user_123:*")
         """
+        # Input validation
+        if not pattern or pattern.strip() == "*":
+            raise ValueError("Pattern '*' would delete all keys. Use flushdb() instead.")
+
+        if not any(c in pattern for c in ['*', '?', '[']):
+            log.warning(
+                "clear_pattern_no_wildcards",
+                pattern=pattern,
+                message="Pattern has no wildcards, will only match exact key"
+            )
+
         try:
             cursor = 0
             deleted = 0

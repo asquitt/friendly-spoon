@@ -14,7 +14,7 @@ Key features:
 from functools import lru_cache
 from typing import Literal, Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 
 class Settings(BaseSettings):
@@ -313,11 +313,11 @@ class Settings(BaseSettings):
         description="Cost per 1K output tokens by model"
     )
 
-    class Config:
-        """Pydantic configuration."""
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False
+    )
 
 
 @lru_cache()

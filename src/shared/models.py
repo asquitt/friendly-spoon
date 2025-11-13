@@ -16,7 +16,7 @@ Why Pydantic?
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from enum import Enum
 
 
@@ -151,7 +151,8 @@ class LLMInteraction(BaseModel):
         description="Additional metadata (tags, experiment IDs, etc.)"
     )
 
-    @validator('prompt')
+    @field_validator('prompt')
+    @classmethod
     def prompt_not_empty(cls, v):
         """Ensure prompt is not empty."""
         if not v or not v.strip():
@@ -169,8 +170,8 @@ class LLMInteraction(BaseModel):
         total = self.total_tokens
         return self.cost_usd / total if total > 0 else 0.0
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "interaction_id": "int_abc123",
                 "user_id": "user_456",
@@ -186,6 +187,7 @@ class LLMInteraction(BaseModel):
                 "metadata": {"experiment": "A/B test v2"}
             }
         }
+    )
 
 
 class Feature(BaseModel):
@@ -245,8 +247,8 @@ class Feature(BaseModel):
         description="Additional metadata"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "feature_name": "avg_prompt_length_7d",
                 "entity_id": "user_456",
@@ -256,6 +258,7 @@ class Feature(BaseModel):
                 "metadata": {"window": "7d", "computation_time_ms": 45}
             }
         }
+    )
 
 
 class EmbeddingRequest(BaseModel):
@@ -363,7 +366,8 @@ class EmbeddingResponse(BaseModel):
         description="Response timestamp"
     )
 
-    @validator('embedding')
+    @field_validator('embedding')
+    @classmethod
     def validate_embedding(cls, v):
         """Ensure embedding is not empty."""
         if not v:
