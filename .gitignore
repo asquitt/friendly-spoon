@@ -86,3 +86,6 @@ models/
 *.coverage
 coverage.xml
 htmlcov/
+benchmark_results.json
+benchmark_results.png
+test_*.log
